@@ -16,6 +16,8 @@ typedef struct _linreg {
   t_float b;
 
   t_outlet *prediction_outlet;
+  t_outlet *weights_outlet;
+  t_outlet *bias_outlet;
 } t_linreg;
 
 
@@ -46,8 +48,64 @@ void *linreg_new(t_symbol *s, int argc, t_atom *argv)
   x->b = 0.0;
 
   x->prediction_outlet = outlet_new(&x->x_obj, &s_list);
+  x->weights_outlet = outlet_new(&x->x_obj, &s_list);
+  x->bias_outlet = outlet_new(&x->x_obj, &s_float);
 
   return (void *)x;
+}
+
+void linreg_get_weights(t_linreg *x)
+{
+  t_atom w_atoms[x->nx];
+
+  // convert the weights to atoms for output
+  for (int i = 0; i < x->nx; i++) {
+    SETFLOAT(&w_atoms[i], x->w[i]);
+  }
+
+  outlet_list(x->weights_outlet, &s_list, x->nx, w_atoms);
+}
+
+void linreg_get_bias(t_linreg *x)
+{
+  outlet_float(x->bias_outlet, x->b);
+}
+
+void linreg_set_weights(t_linreg *x, t_symbol *s, int argc, t_atom *argv)
+{
+  if (argc != x->nx) {
+    pd_error(x, "linreg: expected %ld values for weights (nx=%ld)",
+             x->nx, x->nx);
+    return;
+  }
+
+  for (int i = 0; i < x->nx; i++) {
+    x->w[i] = atom_getfloat(argv + i);
+  }
+}
+
+void linreg_set_bias(t_linreg *x, t_float f)
+{
+  x->b = f;
+}
+
+void linreg_set_alpha(t_linreg *x, t_float f)
+{
+  if (f <= 0) {
+    pd_error(x, "linreg: learning rate must be positive");
+    return;
+  }
+
+  x->alpha = f;
+}
+
+// fairly sure I could use the set_bias and set_weights methods here
+void linreg_reset(t_linreg *x)
+{
+  for (int i = 0; i < x->nx; i++) {
+    x->w[i] = 0.0;
+  }
+  x->b = 0.0;
 }
 
 void linreg_free(t_linreg *x)
@@ -137,9 +195,12 @@ void linreg_bang(t_linreg *x)
     SETFLOAT(&pred_atoms[i], predictions[i]);
   }
 
-  outlet_list(x->prediction_outlet, &s_list, x->m, pred_atoms);
-
   linreg_backward(x, predictions);
+
+  linreg_get_bias(x);
+  linreg_get_weights(x);
+
+  outlet_list(x->prediction_outlet, &s_list, x->m, pred_atoms);
 }
 
 void linreg_setup(void)
@@ -155,6 +216,15 @@ void linreg_setup(void)
   class_addbang(linreg_class, linreg_bang);
   class_addmethod(linreg_class, (t_method)linreg_set_x, gensym("x"), A_GIMME, 0);
   class_addmethod(linreg_class, (t_method)linreg_set_y, gensym("y"), A_GIMME, 0);
+
+  class_addmethod(linreg_class, (t_method)linreg_get_weights, gensym("get_weights"), 0);
+  class_addmethod(linreg_class, (t_method)linreg_get_bias, gensym("get_bias"), 0);
+  class_addmethod(linreg_class, (t_method)linreg_set_weights, gensym("weights"),
+                  A_GIMME, 0);
+  class_addmethod(linreg_class, (t_method)linreg_set_bias, gensym("bias"), A_FLOAT, 0);
+  class_addmethod(linreg_class, (t_method)linreg_set_alpha, gensym("alpha"), A_FLOAT, 0);
+
+  class_addmethod(linreg_class, (t_method)linreg_reset, gensym("reset"), 0);
 }
 
 
